@@ -77,6 +77,22 @@ exec "$VENV_DIR/bin/python" "$INSTALL_DIR/$MAIN_PY" "\$@"
 EOF
 chmod +x "$WRAPPER_PATH"
 
+AUTO_START="${MOONPHASE_AUTO_START:-1}"
+if [[ "$AUTO_START" == "1" ]]; then
+  if command -v pgrep >/dev/null 2>&1 && pgrep -f "$INSTALL_DIR/$MAIN_PY" >/dev/null 2>&1; then
+    echo "Moonphase already running; skipping auto-start."
+  else
+    nohup "$VENV_DIR/bin/python" "$INSTALL_DIR/$MAIN_PY" \
+      >/tmp/moonphase.log 2>/tmp/moonphase.err </dev/null &
+    sleep 1
+    if command -v pgrep >/dev/null 2>&1 && pgrep -f "$INSTALL_DIR/$MAIN_PY" >/dev/null 2>&1; then
+      echo "Started Moonphase now (menu bar icon should appear)."
+    else
+      echo "Could not confirm startup automatically; run '$WRAPPER_NAME' manually."
+    fi
+  fi
+fi
+
 echo
 echo "Installed. Run:  $WRAPPER_NAME"
 echo "  (or:  $VENV_DIR/bin/python $INSTALL_DIR/$MAIN_PY)"

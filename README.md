@@ -26,6 +26,8 @@ curl -fsSL "https://raw.githubusercontent.com/guillermodoghel/moonphase/main/set
 
 The default clone URL is [guillermodoghel/moonphase](https://github.com/guillermodoghel/moonphase) (set `MOONPHASE_REPO` to use a fork or mirror). The script creates a venv, installs [requirements.txt](requirements.txt), and adds a `moonphase` command under `~/.local/bin` (or `MOONPHASE_BIN_DIR`). The repo must be cloneable without an interactive prompt (public, or stored credentials).
 
+After setup, the installer also tries to **start Moonphase immediately** so the menubar icon appears right away. To disable that behavior in automation, set `MOONPHASE_AUTO_START=0`.
+
 **Optional environment variables** (all optional; defaults shown):
 
 | Variable | Default | Meaning |
@@ -33,6 +35,7 @@ The default clone URL is [guillermodoghel/moonphase](https://github.com/guillerm
 | `MOONPHASE_REPO` | `https://github.com/guillermodoghel/moonphase.git` | Git URL to clone |
 | `MOONPHASE_INSTALL` | `$HOME/Applications/moonphase` | Where the clone and `.venv` live (ignored when you run `setup.sh` from a local checkout) |
 | `MOONPHASE_BIN_DIR` | `~/.local/bin` | Where the `moonphase` launcher is written |
+| `MOONPHASE_AUTO_START` | `1` | Start the app automatically at the end of setup (`0` disables) |
 
 After install, if `moonphase` is not found, add that bin directory to your `PATH` (the installer prints a zsh `export` line you can copy).
 

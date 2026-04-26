@@ -1,0 +1,6 @@
+ephem>=4.2
+matplotlib>=3.8
+numpy>=1.24
+pyobjc-core>=9.0
+pyobjc-framework-Cocoa>=9.0
+pyobjc-framework-CoreLocation>=9.0

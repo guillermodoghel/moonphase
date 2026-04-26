@@ -50,6 +50,25 @@ source "$VENV_DIR/bin/activate"
 python -m pip install -q -U pip
 python -m pip install -q -r "$INSTALL_DIR/requirements.txt"
 
+# Optional legacy LaunchAgent plist: paths for *this* machine only (any user’s INSTALL_DIR)
+REAL_ROOT="$(cd "$INSTALL_DIR" && pwd)"
+if [[ -f "$INSTALL_DIR/com.moonphase.app.plist.in" ]]; then
+  R="$REAL_ROOT" VPY="$VENV_DIR/bin/python" MPY="$REAL_ROOT/$MAIN_PY" \
+    "$VENV_DIR/bin/python" -c "import os, pathlib
+r = pathlib.Path(os.environ['R'])
+p = r / 'com.moonphase.app.plist.in'
+t = p.read_text()
+t = t.replace('@VENV_PYTHON@', os.environ['VPY'])
+t = t.replace('@MOONPHASE_MAIN@', os.environ['MPY'])
+out = r / 'com.moonphase.app.plist'
+out.write_text(t)
+print('Wrote', out)" || die "Failed to write com.moonphase.app.plist"
+  echo
+  echo "Wrote  $INSTALL_DIR/com.moonphase.app.plist  (from .plist.in) — optional *service* style"
+  echo "  (KeepAlive). The menubar app uses Settings (⌘,) → com.moonphase.menubar; do not load"
+  echo "  both. To use this one:  launchctl bootstrap \"gui/\$(id -u)\" \"$INSTALL_DIR/com.moonphase.app.plist\""
+fi
+
 mkdir -p "$BIN_STEM"
 WRAPPER_PATH="$BIN_STEM/$WRAPPER_NAME"
 cat > "$WRAPPER_PATH" <<EOF

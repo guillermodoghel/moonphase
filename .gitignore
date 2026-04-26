@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 .DS_Store
 .claude/
+# Filled in by setup.sh from com.moonphase.app.plist.in (machine-specific paths)
+com.moonphase.app.plist

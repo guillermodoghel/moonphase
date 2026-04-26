@@ -71,7 +71,13 @@ Open **Settings…** in the menubar (⌘,). There you can:
 
 3. The app briefly switches to a normal **activation policy** while Settings (or the Astral chart window) is open so windows get focus; it returns to a pure menu bar style when you close the last of those windows.
 
-If you use **another** Launch Agent (for example an older `com.moonphase.app` or custom plist) for the *same* code, disable one path so you do not run two copies. The installer and this README only describe the in-app, `com.moonphase.menubar` flow.
+If you use **another** Launch Agent for the *same* code, disable one path so you do not run two copies.
+
+### 📦 Optional legacy `com.moonphase.app` (hand‑loaded `launchd`)
+
+- The **repository** only contains [com.moonphase.app.plist.in](com.moonphase.app.plist.in) — no hardcoded usernames or `/Users/…` paths.  
+- **`setup.sh` fills it in** for *whoever* runs the installer: it writes `com.moonphase.app.plist` beside your install using the real **`…/.venv/bin/python`** and **`…/moonphase.py`** (absolute paths for that machine’s `MOONPHASE_INSTALL`). That file is in `.gitignore` so a local dev tree is not filled with your paths on commit.  
+- This label is **`com.moonphase.app`** (KeepAlive, service-style). The menubar app’s **Settings (⌘,)** uses a different id: **`com.moonphase.menubar`**. Do **not** `launchctl bootstrap` *both* plists for the same app. For day‑to‑day use, prefer *Settings* in the app. If you do want the legacy one, the installer prints a `launchctl bootstrap` example.  
 
 ## ✏️ License
 

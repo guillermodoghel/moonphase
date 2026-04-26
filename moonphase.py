@@ -44,6 +44,7 @@ def _launch_plist_path():
 
 
 def _launchd_list_has_label():
+    """``launchctl list`` outputs: PID, Status, Label (label is last, not first)."""
     r = subprocess.run(
         ["/bin/launchctl", "list"],
         capture_output=True,
@@ -54,7 +55,11 @@ def _launchd_list_has_label():
         return False
     for line in r.stdout.splitlines():
         parts = line.split()
-        if parts and parts[0] == LAUNCH_AGENT_LABEL:
+        if len(parts) < 3:
+            continue
+        if parts[0] in ("PID", "Program"):
+            continue
+        if parts[-1] == LAUNCH_AGENT_LABEL:
             return True
     return False
 
@@ -963,26 +968,67 @@ class AppController(AppKit.NSObject):
         self._panel_view.reapplyTimeframe_value_(new, s_new)
         self._refresh()
 
-    def expandClicked_(self, sender):
-        if self._expand_window is None:
-            self._build_expand_window()
-        self._expand_open_once = True
-        self._expand_window.makeKeyAndOrderFront_(sender)
+    def _apply_activation_for_panel(self):
+        # Accessory/LSUIElement apps do not get key main status by default; bring us forward
+        # so the Settings and Chart windows can receive clicks and the keyboard.
+        try:
+            AppKit.NSApp.setActivationPolicy_(
+                AppKit.NSApplicationActivationPolicyRegular
+            )
+        except Exception:
+            pass
         try:
             AppKit.NSApp.activateIgnoringOtherApps_(True)
         except Exception:
             pass
+
+    def _try_restore_accessory(self):
+        sw = self._settings_window
+        ex = self._expand_window
+        s_vis = sw is not None and bool(sw.isVisible())
+        e_vis = ex is not None and bool(ex.isVisible())
+        if s_vis or e_vis:
+            return
+        try:
+            AppKit.NSApp.setActivationPolicy_(
+                AppKit.NSApplicationActivationPolicyAccessory
+            )
+        except Exception:
+            pass
+
+    def windowWillClose_(self, notification):
+        w = notification.object()
+        if w in (self._settings_window, self._expand_window):
+            def _on_main():
+                self._try_restore_accessory()
+
+            AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(_on_main)
+
+    @staticmethod
+    def _ns_switch_value_is_on(switch_state):
+        s = int(switch_state) if switch_state is not None else 0
+        on = int(
+            getattr(
+                AppKit, "NSControlStateValueOn",
+                getattr(AppKit, "NSOnState", 1)
+            )
+        )
+        return s == on
+
+    def expandClicked_(self, sender):
+        if self._expand_window is None:
+            self._build_expand_window()
+        self._expand_open_once = True
+        self._apply_activation_for_panel()
+        self._expand_window.makeKeyAndOrderFront_(sender)
         self._refresh()
 
     def openSettings_(self, sender):
         if self._settings_window is None:
             self._build_settings_window()
         self._sync_settings_state_from_system()
+        self._apply_activation_for_panel()
         self._settings_window.makeKeyAndOrderFront_(sender)
-        try:
-            AppKit.NSApp.activateIgnoringOtherApps_(True)
-        except Exception:
-            pass
 
     def _build_settings_window(self):
         w, h = 500.0, 360.0
@@ -997,6 +1043,10 @@ class AppController(AppKit.NSObject):
         )
         win.setTitle_("Moonphase settings")
         win.setReleasedWhenClosed_(False)
+        try:
+            win.setDelegate_(self)
+        except Exception:
+            pass
         if hasattr(win, "setFrameAutosaveName_"):
             win.setFrameAutosaveName_("MoonphaseSettings")
         if hasattr(win, "center"):
@@ -1165,14 +1215,18 @@ class AppController(AppKit.NSObject):
     def settingsLoginChanged_(self, sender):
         if self._settings_silent or self._set_cb_login is None:
             return
-        want = bool(sender.state())
+        want = self._ns_switch_value_is_on(sender.state())
         if not want:
             ok, err = clear_launch_at_login()
             if not ok and err:
                 self._settings_informative_alert("Could not remove login item", err)
             self._sync_settings_state_from_system()
             return
-        keep = bool(self._set_cb_keep.state()) if self._set_cb_keep else False
+        keep = (
+            self._ns_switch_value_is_on(self._set_cb_keep.state())
+            if self._set_cb_keep
+            else False
+        )
         ok, err = set_launch_at_login(keep)
         if not ok and err:
             self._settings_informative_alert("Could not enable “Open at login”", err)
@@ -1181,9 +1235,9 @@ class AppController(AppKit.NSObject):
     def settingsKeepChanged_(self, sender):
         if self._settings_silent or self._set_cb_login is None:
             return
-        if not bool(self._set_cb_login.state()):
+        if not self._ns_switch_value_is_on(self._set_cb_login.state()):
             return
-        want_keep = bool(sender.state())
+        want_keep = self._ns_switch_value_is_on(sender.state())
         ok, err = set_launch_at_login(want_keep)
         if not ok and err:
             self._settings_informative_alert("Could not update the Launch Agent", err)
@@ -1205,6 +1259,10 @@ class AppController(AppKit.NSObject):
         )
         win.setTitle_("Astral chart")
         win.setReleasedWhenClosed_(False)
+        try:
+            win.setDelegate_(self)
+        except Exception:
+            pass
         win.setMinSize_(AppKit.NSMakeSize(700, 480))
 
         root = AstralBgView.alloc().initWithFrame_(

@@ -2,6 +2,8 @@
 
 A small **macOS menu bar** app: moon phase, chart, and sky information side by side. It uses your location (with permission) for accurate rise/set and chart data.
 
+**Source:** [github.com/guillermodoghel/moonphase](https://github.com/guillermodoghel/moonphase)
+
 ## Requirements
 
 - macOS (uses AppKit / menu bar; not supported on Windows or Linux)
@@ -10,24 +12,28 @@ A small **macOS menu bar** app: moon phase, chart, and sky information side by s
 
 ## One-line install
 
-Push this repository to GitHub (or use another public `git` URL), then run (replace `YOUR_USER` and `main` if your branch is different):
-
 ```bash
-export MOONPHASE_REPO="https://github.com/YOUR_USER/moonphase.git"   # optional; matches default in setup.sh if you use guillermodoghel/moonphase
-curl -fsSL "https://raw.githubusercontent.com/YOUR_USER/moonphase/main/setup.sh" | bash
+curl -fsSL "https://raw.githubusercontent.com/guillermodoghel/moonphase/main/setup.sh" | bash
 ```
 
-The script clones the repo, creates a venv, installs [requirements.txt](requirements.txt), and places a `moonphase` command in `~/.local/bin` (see table below to change paths). It only works if the `MOONPHASE_REPO` is cloneable (public, or you have git credentials for it).
+The default clone URL is [guillermodoghel/moonphase](https://github.com/guillermodoghel/moonphase) (set `MOONPHASE_REPO` to use a fork or mirror). The script creates a venv, installs [requirements.txt](requirements.txt), and places a `moonphase` command in `~/.local/bin` (you can change paths with the table below). The repository must be cloneable without interactive login (a public URL, or credentials you have already stored for Git).
 
 **Optional environment variables** (all optional; defaults shown):
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `MOONPHASE_REPO` | see `setup.sh` | Git URL to clone |
-| `MOONPHASE_INSTALL` | `$HOME/Applications/moonphase` | Where the repo and `.venv` live |
+| `MOONPHASE_REPO` | `https://github.com/guillermodoghel/moonphase.git` | Git URL to clone |
+| `MOONPHASE_INSTALL` | `$HOME/Applications/moonphase` | Where the clone and `.venv` live (ignored when you run `setup.sh` from a local checkout) |
 | `MOONPHASE_BIN_DIR` | `$HOME/.local/bin` | Where the `moonphase` launcher is written |
 
 After install, if `moonphase` is not found, add `~/.local/bin` to your `PATH` (the installer prints the exact `export` line for zsh).
+
+## Install from a clone (same machine)
+
+```bash
+cd moonphase   # your git clone
+./setup.sh
+```
 
 ## Manual install (from a clone)
 
@@ -42,19 +48,11 @@ python moonphase.py
 
 ## Run
 
-- From install: `moonphase` (after `PATH` includes `~/.local/bin` if needed), or:  
-  `~/.local/bin/moonphase`
-- From a dev venv: `python moonphase.py`
+- With installer: `moonphase` (after `PATH` includes `~/.local/bin` if needed), or `~/.local/bin/moonphase`
+- From a venv: `python moonphase.py`
 
 Grant **Location** when macOS asks so the app can compute local sky and chart data.
 
-## Publishing checklist
-
-1. Create a public GitHub repository and push this project (avoid committing a local `venv/`; keep `requirements.txt` in the repo).
-2. Replace `YOUR_USER` in the README `curl` example with your GitHub username.
-3. Edit the default `MOONPHASE_REPO` in `setup.sh` if you do not use `guillermodoghel/moonphase`.
-4. Tag a release if you use GitHub releases; the `raw.githubusercontent.com/.../main/setup.sh` URL is enough for the curl installer.
-
 ## License
 
-Add a `LICENSE` file when you choose a license for publication.
+No `LICENSE` file in this repository yet; add one if you want to specify terms of use for others.

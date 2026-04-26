@@ -1,15 +1,203 @@
 #!/usr/bin/env python3
 """Moon phase menu bar app — chart + sky info side by side."""
 
+import fcntl
 import io
 import math
+import os
+import plistlib
+import subprocess
+import sys
+import tempfile
 import threading
 from datetime import datetime, timezone
 
 import ephem
+import Foundation
 import objc
 import AppKit
 import CoreLocation
+
+# ── Run at login (LaunchAgent) + single instance ────────────────────────────
+# Moonphase is a .py + interpreter; a Launch Agent in ~/Library/LaunchAgents
+# is the most reliable "open at login" strategy. It is listed under System
+# Settings → General → Login Items/Background. Optional KeepAlive = relaunch
+# on crash (heavier, similar to a "service" launchd config).
+# See README for strategy vs. a manual com.moonphase.app plist.
+LAUNCH_AGENT_LABEL = "com.moonphase.menubar"
+LAUNCH_PLIST_NAME = "com.moonphase.menubar.plist"
+PREF_KEY_LOGIN = "com.moonphase.menubar.loginAgent"
+PREF_KEY_KEEP = "com.moonphase.menubar.loginKeepAlive"
+_lockfile_fp = None   # process lifetime; keep flock held
+
+
+def _app_executable_and_script():
+    ex = os.path.realpath(sys.executable)
+    sc = os.path.realpath(__file__)
+    return (ex, sc)
+
+
+def _launch_plist_path():
+    return os.path.join(
+        os.path.expanduser("~"), "Library", "LaunchAgents", LAUNCH_PLIST_NAME
+    )
+
+
+def _launchd_list_has_label():
+    r = subprocess.run(
+        ["/bin/launchctl", "list"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if r.returncode != 0 or not r.stdout:
+        return False
+    for line in r.stdout.splitlines():
+        parts = line.split()
+        if parts and parts[0] == LAUNCH_AGENT_LABEL:
+            return True
+    return False
+
+
+def _launchd_bootout():
+    uid = str(os.getuid())
+    domain = f"gui/{uid}"
+    for target in (LAUNCH_AGENT_LABEL,):
+        p = subprocess.run(
+            ["/bin/launchctl", "bootout", domain, target],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if p.returncode == 0:
+            return
+    pth = _launch_plist_path()
+    if os.path.isfile(pth):
+        subprocess.run(
+            ["/bin/launchctl", "bootout", domain, pth],
+            capture_output=True, text=True, timeout=20,
+        )
+
+
+def _pldict_keepalive(pl):
+    v = (pl or {}).get("KeepAlive", False)
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, dict) and "SuccessfulExit" in v:
+        return True
+    return bool(v)
+
+
+def _read_plist_info():
+    path = _launch_plist_path()
+    if not os.path.isfile(path):
+        return None, False
+    try:
+        with open(path, "rb") as f:
+            d = plistlib.load(f)
+    except OSError:
+        return None, False
+    return d, _pldict_keepalive(d)
+
+
+def launch_agent_is_active():
+    """Plist is present, job is in launchd, and RunAtLoad is the login trigger."""
+    path = _launch_plist_path()
+    if not os.path.isfile(path):
+        return False
+    return _launchd_list_has_label()
+
+
+def _write_launch_plist(executable, script, keepalive):
+    os.makedirs(
+        os.path.join(os.path.expanduser("~"), "Library", "LaunchAgents"),
+        exist_ok=True,
+    )
+    path = _launch_plist_path()
+    data = {
+        "Label": LAUNCH_AGENT_LABEL,
+        "RunAtLoad": True,
+        "LimitLoadToSessionType": "Aqua",
+        "ProgramArguments": [executable, script],
+    }
+    if keepalive:
+        data["KeepAlive"] = True
+    with open(path, "wb") as f:
+        plistlib.dump(data, f)
+
+
+def _launchd_bootstrap():
+    path = _launch_plist_path()
+    uid = str(os.getuid())
+    p = subprocess.run(
+        ["/bin/launchctl", "bootstrap", f"gui/{uid}", path],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if p.returncode == 0:
+        return (True, "")
+    return (False, p.stderr or p.stdout or f"exit {p.returncode}")
+
+
+def set_launch_at_login(keepalive):
+    """Create/update LaunchAgent and load it. Call from main thread."""
+    ex, sc = _app_executable_and_script()
+    _launchd_bootout()  # unload for clean replace; ignore
+    _write_launch_plist(ex, sc, keepalive)
+    ok, err = _launchd_bootstrap()
+    if not ok:
+        try:
+            os.remove(_launch_plist_path())
+        except OSError:
+            pass
+        return (False, err)
+    defaults = Foundation.NSUserDefaults.standardUserDefaults()
+    defaults.setBool_forKey_(True, PREF_KEY_LOGIN)
+    defaults.setBool_forKey_(bool(keepalive), PREF_KEY_KEEP)
+    return (True, "")
+
+
+def clear_launch_at_login():
+    """Remove LaunchAgent and delete plist."""
+    _launchd_bootout()
+    try:
+        os.remove(_launch_plist_path())
+    except OSError:
+        pass
+    defaults = Foundation.NSUserDefaults.standardUserDefaults()
+    defaults.setBool_forKey_(False, PREF_KEY_LOGIN)
+    defaults.setBool_forKey_(False, PREF_KEY_KEEP)
+    if _launchd_list_has_label():
+        return (True, "The job may disappear after a sign-out. If a duplicate still appears, reboot once.")
+    return (True, "")
+
+
+def maybe_repair_login_agent_on_startup():
+    """Re-install agent if the user had it enabled in prefs but files were removed."""
+    defaults = Foundation.NSUserDefaults.standardUserDefaults()
+    if not defaults.boolForKey_(PREF_KEY_LOGIN):
+        return
+    if launch_agent_is_active():
+        return
+    keep = defaults.boolForKey_(PREF_KEY_KEEP)
+    set_launch_at_login(keep)
+
+
+def acquire_single_instance_lock_or_quiet_exit():
+    """If another copy is in the menubar, exit. Suppresses double-run after launchctl."""
+    global _lockfile_fp
+    path = os.path.join(
+        tempfile.gettempdir(), f"moonphase_menubar_{os.getuid()}.lock"
+    )
+    f = open(path, "a+")
+    try:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, BlockingIOError):
+        f.close()
+        os._exit(0)
+    _lockfile_fp = f
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -680,6 +868,13 @@ class AppController(AppKit.NSObject):
         self._exp_syncing = False
         self._expand_open_once = False
 
+        self._settings_window = None
+        self._settings_silent = False
+        self._set_cb_login = None
+        self._set_cb_keep = None
+        self._set_status = None
+        self._set_help = None
+
         # Status item
         bar = AppKit.NSStatusBar.systemStatusBar()
         self._item = bar.statusItemWithLength_(AppKit.NSVariableStatusItemLength)
@@ -695,6 +890,19 @@ class AppController(AppKit.NSObject):
         )
         view_item.setView_(self._panel_view)
         menu.addItem_(view_item)
+
+        menu.addItem_(AppKit.NSMenuItem.separatorItem())
+
+        set_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Settings…", "openSettings:", ","
+        )
+        set_item.setKeyEquivalentModifierMask_(
+            getattr(
+                AppKit, "NSEventModifierFlagCommand", getattr(AppKit, "NSCommandKeyMask", 1 << 20)
+            )
+        )
+        set_item.setTarget_(self)
+        menu.addItem_(set_item)
 
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
 
@@ -723,6 +931,7 @@ class AppController(AppKit.NSObject):
         )
 
         self._refresh()
+        maybe_repair_login_agent_on_startup()
         return self
 
     def _location_received(self, lat, lon):
@@ -764,6 +973,221 @@ class AppController(AppKit.NSObject):
         except Exception:
             pass
         self._refresh()
+
+    def openSettings_(self, sender):
+        if self._settings_window is None:
+            self._build_settings_window()
+        self._sync_settings_state_from_system()
+        self._settings_window.makeKeyAndOrderFront_(sender)
+        try:
+            AppKit.NSApp.activateIgnoringOtherApps_(True)
+        except Exception:
+            pass
+
+    def _build_settings_window(self):
+        w, h = 500.0, 360.0
+        m = (
+            getattr(AppKit, "NSWindowStyleMaskTitled", 1)
+            | getattr(AppKit, "NSWindowStyleMaskClosable", 2)
+        )
+        rect = AppKit.NSMakeRect(160, 160, w, h)
+        back = getattr(AppKit, "NSBackingStoreBuffered", 2)
+        win = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            rect, m, back, False
+        )
+        win.setTitle_("Moonphase settings")
+        win.setReleasedWhenClosed_(False)
+        if hasattr(win, "setFrameAutosaveName_"):
+            win.setFrameAutosaveName_("MoonphaseSettings")
+        if hasattr(win, "center"):
+            win.center()
+        root = AppKit.NSView.alloc().initWithFrame_(
+            AppKit.NSMakeRect(0, 0, w, h)
+        )
+        fmask = (
+            getattr(AppKit, "NSViewWidthSizable", 2)
+            | getattr(AppKit, "NSViewHeightSizable", 16)
+        )
+        root.setAutoresizingMask_(fmask)
+
+        pad = 18.0
+        help_h = 96.0
+        t1 = AppKit.NSTextField.alloc().initWithFrame_(
+            AppKit.NSMakeRect(pad, 300.0, w - 2 * pad, 22.0)
+        )
+        t1.setStringValue_("Open at login (Launch Agent)")
+        t1.setBezeled_(False)
+        t1.setDrawsBackground_(False)
+        t1.setEditable_(False)
+        t1.setSelectable_(False)
+        t1.setFont_(_font(12, True))
+        t1.setAutoresizingMask_(2)
+
+        cb1 = AppKit.NSButton.alloc().initWithFrame_(
+            AppKit.NSMakeRect(pad, 262.0, 420.0, 24.0)
+        )
+        cb1.setTitle_("Start Moonphase when I log in")
+        cb1.setButtonType_(
+            getattr(
+                AppKit, "NSButtonTypeSwitch", getattr(AppKit, "NSButtonTypeOnOff", 3)
+            )
+        )
+        cb1.setState_(getattr(
+            AppKit, "NSControlStateValueOff", getattr(AppKit, "NSOffState", 0)
+        ))
+        cb1.setTarget_(self)
+        cb1.setAction_("settingsLoginChanged:")
+        cb1.setAutoresizingMask_(2)
+
+        cb2 = AppKit.NSButton.alloc().initWithFrame_(
+            AppKit.NSMakeRect(pad, 220.0, 460.0, 32.0)
+        )
+        cb2.setTitle_(
+            "Keep it running (relaunch if it quits) — like a background service"
+        )
+        cb2.setButtonType_(
+            getattr(
+                AppKit, "NSButtonTypeSwitch", getattr(AppKit, "NSButtonTypeOnOff", 3)
+            )
+        )
+        cb2.setState_(0)
+        cb2.setTarget_(self)
+        cb2.setAction_("settingsKeepChanged:")
+        cb2.setAutoresizingMask_(2)
+
+        st = AppKit.NSTextField.alloc().initWithFrame_(
+            AppKit.NSMakeRect(pad, 112.0, w - 2 * pad, 38.0)
+        )
+        st.setStringValue_("")
+        st.setBezeled_(False)
+        st.setDrawsBackground_(False)
+        st.setEditable_(False)
+        st.setSelectable_(False)
+        st.setTextColor_(_nscolor("#6d6a7a"))
+        st.setFont_(_font(10, False))
+        st.setAutoresizingMask_(
+            getattr(AppKit, "NSViewWidthSizable", 2) | 16
+        )
+        if hasattr(st, "setLineBreakMode_"):
+            st.setLineBreakMode_(0)
+
+        hel = AppKit.NSTextField.alloc().initWithFrame_(
+            AppKit.NSMakeRect(pad, 8.0, w - 2 * pad, help_h)
+        )
+        hel.setStringValue_(
+            "STRATEGY — Moonphase installs a personal launchd job under "
+            "~/Library/LaunchAgents (com.moonphase.menubar), which also appears in "
+            "System Settings → General → Login Items. It runs the same python + "
+            "script you started now—no .app bundle. If you also use a manual "
+            "com.moonphase.app (or any second agent) for this code, turn one off: "
+            "a lock file makes duplicate launches exit quietly so only one menubar item runs."
+        )
+        hel.setBezeled_(False)
+        hel.setDrawsBackground_(False)
+        hel.setEditable_(False)
+        if hasattr(hel, "setSelectable_"):
+            hel.setSelectable_(True)
+        if hasattr(hel, "setUsesSingleLineMode_"):
+            hel.setUsesSingleLineMode_(False)
+        if hasattr(hel, "setMaximumNumberOfLines_"):
+            hel.setMaximumNumberOfLines_(0)
+        if hasattr(hel, "setCell_"):
+            try:
+                c = hel.cell()
+                if c and hasattr(c, "setWraps_"):
+                    c.setWraps_(True)
+            except Exception:
+                pass
+        if hasattr(hel, "setFont_"):
+            hel.setFont_(_font(9.5, False))
+        if hasattr(hel, "setTextColor_"):
+            hel.setTextColor_(_nscolor("#4a4a5c"))
+        hel.setAutoresizingMask_(
+            getattr(AppKit, "NSViewWidthSizable", 2) | 32
+        )
+
+        for sub in (t1, cb1, cb2, st, hel):
+            root.addSubview_(sub)
+        win.setContentView_(root)
+        self._settings_window = win
+        self._set_cb_login = cb1
+        self._set_cb_keep = cb2
+        self._set_status = st
+        self._set_help = hel
+
+    def _sync_settings_state_from_system(self):
+        if self._set_cb_login is None or self._set_cb_keep is None:
+            return
+        self._settings_silent = True
+        ons = getattr(
+            AppKit, "NSControlStateValueOn", getattr(AppKit, "NSOnState", 1)
+        )
+        offs = getattr(
+            AppKit, "NSControlStateValueOff", getattr(AppKit, "NSOffState", 0)
+        )
+        try:
+            pl, k_from_pl = (None, False)
+            if os.path.isfile(_launch_plist_path()):
+                pl, k_from_pl = _read_plist_info()
+            active = launch_agent_is_active()
+            if not active:
+                self._set_cb_login.setState_(offs)
+                self._set_cb_keep.setState_(offs)
+                self._set_cb_keep.setEnabled_(False)
+                msg = "Open at login: off."
+            else:
+                self._set_cb_login.setState_(ons)
+                self._set_cb_keep.setEnabled_(True)
+                keep_on = bool(k_from_pl) if pl is not None else bool(
+                    Foundation.NSUserDefaults.standardUserDefaults().boolForKey_(
+                        PREF_KEY_KEEP
+                    )
+                )
+                self._set_cb_keep.setState_(ons if keep_on else offs)
+                klive = k_from_pl if pl is not None else keep_on
+                msg = (
+                    f"Open at login: on — {LAUNCH_AGENT_LABEL}"
+                    f"  (KeepAlive: {'on' if klive else 'off'})"
+                )
+            if self._set_status:
+                self._set_status.setStringValue_(msg)
+        finally:
+            self._settings_silent = False
+
+    def _settings_informative_alert(self, text, sub=""):
+        a = AppKit.NSAlert.alloc().init()
+        a.setMessageText_(text)
+        if sub:
+            a.setInformativeText_(str(sub)[:2000])
+        a.addButtonWithTitle_("OK")
+        a.runModal()
+
+    def settingsLoginChanged_(self, sender):
+        if self._settings_silent or self._set_cb_login is None:
+            return
+        want = bool(sender.state())
+        if not want:
+            ok, err = clear_launch_at_login()
+            if not ok and err:
+                self._settings_informative_alert("Could not remove login item", err)
+            self._sync_settings_state_from_system()
+            return
+        keep = bool(self._set_cb_keep.state()) if self._set_cb_keep else False
+        ok, err = set_launch_at_login(keep)
+        if not ok and err:
+            self._settings_informative_alert("Could not enable “Open at login”", err)
+        self._sync_settings_state_from_system()
+
+    def settingsKeepChanged_(self, sender):
+        if self._settings_silent or self._set_cb_login is None:
+            return
+        if not bool(self._set_cb_login.state()):
+            return
+        want_keep = bool(sender.state())
+        ok, err = set_launch_at_login(want_keep)
+        if not ok and err:
+            self._settings_informative_alert("Could not update the Launch Agent", err)
+        self._sync_settings_state_from_system()
 
     def _build_expand_window(self):
         pad = float(EXPAND_INNER)
@@ -1076,6 +1500,7 @@ _controller_ref = None   # module-level strong reference prevents GC
 
 def main():
     global _controller_ref
+    acquire_single_instance_lock_or_quiet_exit()
     app = AppKit.NSApplication.sharedApplication()
     app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
     _controller_ref = AppController.alloc().init()

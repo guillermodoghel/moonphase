@@ -67,4 +67,8 @@ if [[ ":$PATH:" != *":$BIN_STEM:"* ]]; then
   echo "  export PATH=\"$BIN_STEM:\$PATH\""
 fi
 echo
-echo "The app will ask for Location access (for local sky / chart data). You can add Moonphase to Login Items so it starts at login: System Settings → General → Login Items & Extensions."
+echo "Location: macOS may ask for access so charts use your place on Earth."
+echo "Start at login: menubar menu → Settings… (⌘,) and turn on the switch. That writes a"
+echo "  Launch Agent for the same python + moonphase.py you just installed (System Settings"
+echo "  → General → Login Items). If you also use another launchd job for this app, turn one off"
+echo "  so only one process runs in the menubar."

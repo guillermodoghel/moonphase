@@ -1,22 +1,30 @@
-# Moonphase
+# 🌙 Moonphase
 
 A small **macOS menu bar** app: moon phase, chart, and sky information side by side. It uses your location (with permission) for accurate rise/set and chart data.
 
 **Source:** [github.com/guillermodoghel/moonphase](https://github.com/guillermodoghel/moonphase)
 
-## Requirements
+## ✨ What you get
 
-- macOS (uses AppKit / menu bar; not supported on Windows or Linux)
-- [Git](https://git-scm.com/) and **Python 3.10+** (3.12+ recommended) with `pip`  
-  *Install Python from [python.org](https://www.python.org/downloads/) or Homebrew if your system has no `python3`.*
+- 🧭 **Menu bar** moon phase and astral/sky context  
+- 📊 **Chart + info** in the popover, plus a larger **Astral chart** window  
+- 🌍 **Location** for local rise/set (macOS will prompt for access)  
+- ⚙️ **Settings… (⌘,)** — start at login via a personal Launch Agent, optional *KeepAlive* (service-style relaunch)  
+- 🔐 **One menubar copy** at a time (lock file; safe when `launchctl` spawns a second process right after you enable login items)
 
-## One-line install
+## 📋 Requirements
+
+- 🍎 **macOS** (AppKit / menu bar; not for Windows or Linux)  
+- 🔧 [Git](https://git-scm.com/) and **Python 3.10+** (3.12+ recommended) with `pip`  
+  *Install Python from [python.org](https://www.python.org/downloads/) or Homebrew if you have no `python3`.*
+
+## 🚀 One-line install
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/guillermodoghel/moonphase/main/setup.sh" | bash
 ```
 
-The default clone URL is [guillermodoghel/moonphase](https://github.com/guillermodoghel/moonphase) (set `MOONPHASE_REPO` to use a fork or mirror). The script creates a venv, installs [requirements.txt](requirements.txt), and places a `moonphase` command in `~/.local/bin` (you can change paths with the table below). The repository must be cloneable without interactive login (a public URL, or credentials you have already stored for Git).
+The default clone URL is [guillermodoghel/moonphase](https://github.com/guillermodoghel/moonphase) (set `MOONPHASE_REPO` to use a fork or mirror). The script creates a venv, installs [requirements.txt](requirements.txt), and adds a `moonphase` command under `~/.local/bin` (or `MOONPHASE_BIN_DIR`). The repo must be cloneable without an interactive prompt (public, or stored credentials).
 
 **Optional environment variables** (all optional; defaults shown):
 
@@ -24,18 +32,18 @@ The default clone URL is [guillermodoghel/moonphase](https://github.com/guillerm
 |----------|---------|---------|
 | `MOONPHASE_REPO` | `https://github.com/guillermodoghel/moonphase.git` | Git URL to clone |
 | `MOONPHASE_INSTALL` | `$HOME/Applications/moonphase` | Where the clone and `.venv` live (ignored when you run `setup.sh` from a local checkout) |
-| `MOONPHASE_BIN_DIR` | `$HOME/.local/bin` | Where the `moonphase` launcher is written |
+| `MOONPHASE_BIN_DIR` | `~/.local/bin` | Where the `moonphase` launcher is written |
 
-After install, if `moonphase` is not found, add `~/.local/bin` to your `PATH` (the installer prints the exact `export` line for zsh).
+After install, if `moonphase` is not found, add that bin directory to your `PATH` (the installer prints a zsh `export` line you can copy).
 
-## Install from a clone (same machine)
+## 📥 Install from a clone (your machine)
 
 ```bash
 cd moonphase   # your git clone
 ./setup.sh
 ```
 
-## Manual install (from a clone)
+## 🛠️ Manual install (from a clone)
 
 ```bash
 cd moonphase
@@ -46,23 +54,25 @@ pip install -r requirements.txt
 python moonphase.py
 ```
 
-## Run
+## ▶️ Run
 
-- With installer: `moonphase` (after `PATH` includes `~/.local/bin` if needed), or `~/.local/bin/moonphase`
-- From a venv: `python moonphase.py`
+- `moonphase` (if `~/.local/bin` is on your `PATH`)  
+- or `~/.local/bin/moonphase` / `path/to/venv/bin/python path/to/moonphase.py`  
 
-Grant **Location** when macOS asks so the app can compute local sky and chart data.
+The **wrapper** the installer creates points at the same venv and `moonphase.py` the app will record when you use **Settings → start at login**, so paths stay consistent.
 
-## Settings: run at login
+## ⚙️ Settings: run at login
 
-Open **Settings…** from the menu bar (⌘,). There you can:
+Open **Settings…** in the menubar (⌘,). There you can:
 
-1. **Start at login** — install a *personal* [Launch Agent](https://www.launchd.info/) in `~/Library/LaunchAgents` as `com.moonphase.menubar.plist`, loaded with `launchctl` for your user. This is a good match for a script-based app: no `.app` bundle, and it shows up in **System Settings → General → Login Items** (or Background Items on newer macOS) alongside other login items. The agent runs the *same* `python` and `moonphase.py` you are using (paths are written when you turn the option on).
+1. **Start at login** — installs a personal [Launch Agent](https://www.launchd.info/) in `~/Library/LaunchAgents` as `com.moonphase.menubar.plist` and loads it for your user with `launchctl`. No `.app` bundle required; the job points at the **current** `python` and this repo’s `moonphase.py` when you turn the option on. It also appears in **System Settings → General → Login Items** (or *Background* items on newer macOS).
 
-2. **Keep it running (KeepAlive)** — optional. If you turn this on, `launchd` will restart the process if it crashes or exits, closer to a traditional `launchd` *service* (like a manual `KeepAlive` in a plist). Leave it off for a simple “start once at login” behavior.
+2. **Keep it running (KeepAlive)** — optional. `launchd` can restart the process if it quits, closer to a classic *service* plist. Leave it off for a simple “start once at login”.
 
-Only one copy of the app should be in the menubar: a file lock in `/tmp` makes a second process exit immediately (for example, right after the agent is installed, when `launchctl` may start another instance). If you previously set up a **separate** Launch Agent (for example a hand-edited `com.moonphase.app` plist) that points at the same app, turn one of them off so you do not fight two start paths.
+3. The app briefly switches to a normal **activation policy** while Settings (or the Astral chart window) is open so windows get focus; it returns to a pure menu bar style when you close the last of those windows.
 
-## License
+If you use **another** Launch Agent (for example an older `com.moonphase.app` or custom plist) for the *same* code, disable one path so you do not run two copies. The installer and this README only describe the in-app, `com.moonphase.menubar` flow.
+
+## ✏️ License
 
 No `LICENSE` file in this repository yet; add one if you want to specify terms of use for others.
